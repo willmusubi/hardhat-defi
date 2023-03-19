@@ -37,6 +37,30 @@ async function main() {
         lendingPool,
         deployer
     );
+    const daiPrice = await getDaiPrice();
+    const amountDaiToBorrow =
+        (availableBorrowsETH.toString() * 0.95) / daiPrice.toNumber(); // 0.95 due to we don't want to hit the cap
+    const amountDaiToBorrowWei = ethers.utils.parseEther(
+        amountDaiToBorrow.toString()
+    );
+    console.log(`You can borrow ${amountDaiToBorrow.toString()} DAI`);
+
+    await borrowDai(
+        networkConfig[network.config.chainId].daiToken,
+        lendingPool,
+        amountDaiToBorrowWei,
+        deployer
+    );
+    await getBorrowUserData(lendingPool, deployer);
+
+    // 6. Repay
+    await repayDai(
+        networkConfig[network.config.chainId].daiToken,
+        lendingPool,
+        amountDaiToBorrowWei,
+        deployer
+    );
+    await getBorrowUserData(lendingPool, deployer);
 }
 
 async function getLendingPool(account) {
@@ -78,6 +102,47 @@ async function getBorrowUserData(lendingPool, account) {
     console.log(`You have ${totalDebtETH} worth of ETH borrowed.`);
     console.log(`You can borrow ${availableBorrowsETH} worth of ETH.`);
     return { availableBorrowsETH, totalDebtETH };
+}
+
+async function getDaiPrice() {
+    const daiEthPriceFeed = await ethers.getContractAt(
+        "AggregatorV3Interface",
+        networkConfig[network.config.chainId].daiEthPriceFeed // we don't need to connect with deployer because we are not sending any transactions
+    );
+    const price = (await daiEthPriceFeed.latestRoundData())[1]; // first index is the price
+    console.log(`The DAI/ETH price is ${price.toString()}`);
+    return price;
+}
+
+async function borrowDai(daiAddress, lendingPool, amountDaiToBorrow, account) {
+    // function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)
+    const txResponse = await lendingPool.borrow(
+        daiAddress,
+        amountDaiToBorrow, // in wei units
+        1, // interestRateMode: the type of borrow debt. Stable: 1, Variable: 2
+        0, // referral code for our referral program. Use 0 for no referral code.
+        account
+    );
+    await txResponse.wait(1);
+    console.log("You've borrowed!");
+}
+
+async function repayDai(daiAddress, lendingPool, amountDaiToRepay, account) {
+    await approveErc20(
+        daiAddress,
+        lendingPool.address,
+        amountDaiToRepay,
+        account
+    );
+    // function repay(address asset, uint256 amount, uint256 rateMode, address onBehalfOf)
+    const txResponse = await lendingPool.repay(
+        daiAddress,
+        amountDaiToRepay,
+        1,
+        account
+    );
+    await txResponse.wait(1);
+    console.log("Repaid!");
 }
 
 main()
